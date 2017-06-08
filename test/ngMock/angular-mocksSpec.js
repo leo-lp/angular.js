@@ -351,6 +351,75 @@ describe('ngMock', function() {
     }));
 
 
+    it('should allow you to NOT specify the delay time', inject(function($interval) {
+      var counterA = 0;
+      var counterB = 0;
+
+      $interval(function() { counterA++; });
+      $interval(function() { counterB++; }, 0);
+
+      $interval.flush(1000);
+      expect(counterA).toBe(1000);
+      expect(counterB).toBe(1000);
+      $interval.flush(1000);
+      expect(counterA).toBe(2000);
+      expect(counterB).toBe(2000);
+    }));
+
+
+    it('should run tasks in correct relative order', inject(function($interval) {
+      var counterA = 0;
+      var counterB = 0;
+      $interval(function() { counterA++; }, 0);
+      $interval(function() { counterB++; }, 1000);
+
+      $interval.flush(1000);
+      expect(counterA).toBe(1000);
+      expect(counterB).toBe(1);
+      $interval.flush(999);
+      expect(counterA).toBe(1999);
+      expect(counterB).toBe(1);
+      $interval.flush(1);
+      expect(counterA).toBe(2000);
+      expect(counterB).toBe(2);
+    }));
+
+
+    it('should NOT trigger zero-delay interval when flush has ran before', inject(function($interval) {
+      var counterA = 0;
+      var counterB = 0;
+
+      $interval.flush(100);
+
+      $interval(function() { counterA++; });
+      $interval(function() { counterB++; }, 0);
+
+      expect(counterA).toBe(0);
+      expect(counterB).toBe(0);
+
+      $interval.flush(100);
+
+      expect(counterA).toBe(100);
+      expect(counterB).toBe(100);
+    }));
+
+
+    it('should trigger zero-delay interval only once on flush zero', inject(function($interval) {
+      var counterA = 0;
+      var counterB = 0;
+
+      $interval(function() { counterA++; });
+      $interval(function() { counterB++; }, 0);
+
+      $interval.flush(0);
+      expect(counterA).toBe(1);
+      expect(counterB).toBe(1);
+      $interval.flush(0);
+      expect(counterA).toBe(1);
+      expect(counterB).toBe(1);
+    }));
+
+
     it('should allow you to specify a number of iterations', inject(function($interval) {
       var counter = 0;
       $interval(function() {counter++;}, 1000, 2);
@@ -795,23 +864,6 @@ describe('ngMock', function() {
           });
         });
 
-        describe('module cleanup', function() {
-          function testFn() {
-
-          }
-
-          it('should add hashKey to module function', function() {
-            module(testFn);
-            inject(function() {
-              expect(testFn.$$hashKey).toBeDefined();
-            });
-          });
-
-          it('should cleanup hashKey after previous test', function() {
-            expect(testFn.$$hashKey).toBeUndefined();
-          });
-        });
-
         describe('$inject cleanup', function() {
           function testFn() {
 
@@ -940,7 +992,7 @@ describe('ngMock', function() {
       }));
 
       describe('error stack trace when called outside of spec context', function() {
-        // - Chrome, Firefox, Edge, Opera give us the stack trace as soon as an Error is created
+        // - Chrome, Firefox, Edge give us the stack trace as soon as an Error is created
         // - IE10+, PhantomJS give us the stack trace only once the error is thrown
         // - IE9 does not provide stack traces
         var stackTraceSupported = (function() {
@@ -1695,7 +1747,8 @@ describe('ngMock', function() {
 
         expect(function() {
           hb.verifyNoOutstandingRequest();
-        }).toThrowError('Unflushed requests: 1');
+        }).toThrowError('Unflushed requests: 1\n' +
+                        '  GET /some');
       });
 
 
@@ -1707,8 +1760,23 @@ describe('ngMock', function() {
 
         expect(function() {
           hb.verifyNoOutstandingRequest();
-        }).toThrowError('Unflushed requests: 1');
+        }).toThrowError('Unflushed requests: 1\n' +
+                        '  GET /some');
       }));
+
+
+      it('should describe multiple unflushed requests', function() {
+        hb.when('GET').respond(200);
+        hb.when('PUT').respond(200);
+        hb('GET', '/some', null, noop, {});
+        hb('PUT', '/elsewhere', null, noop, {});
+
+        expect(function() {
+          hb.verifyNoOutstandingRequest();
+        }).toThrowError('Unflushed requests: 2\n' +
+                        '  GET /some\n' +
+                        '  PUT /elsewhere');
+      });
     });
 
 
@@ -2056,89 +2124,29 @@ describe('ngMock', function() {
 
   describe('$controllerDecorator', function() {
 
-    describe('with `preAssignBindingsEnabled(true)`', function() {
-
-      beforeEach(module(function($compileProvider) {
-        $compileProvider.preAssignBindingsEnabled(true);
-      }));
-
-
-      it('should support creating controller with bindings', function() {
-        var called = false;
-        var data = [
-          { name: 'derp1', id: 0 },
-          { name: 'testname', id: 1 },
-          { name: 'flurp', id: 2 }
-        ];
-        module(function($controllerProvider) {
-          $controllerProvider.register('testCtrl', function() {
-            expect(this.data).toBe(data);
-            called = true;
-          });
-        });
-        inject(function($controller, $rootScope) {
-          var ctrl = $controller('testCtrl', { scope: $rootScope }, { data: data });
-          expect(ctrl.data).toBe(data);
-          expect(called).toBe(true);
+    it('should support creating controller with bindings', function() {
+      var called = false;
+      var data = [
+        { name: 'derp1', id: 0 },
+        { name: 'testname', id: 1 },
+        { name: 'flurp', id: 2 }
+      ];
+      module(function($controllerProvider) {
+        $controllerProvider.register('testCtrl', function() {
+          expect(this.data).toBeUndefined();
+          called = true;
         });
       });
-
-
-      it('should support assigning bindings when a value is returned from the constructor',
-        function() {
-          var called = false;
-          var data = [
-            { name: 'derp1', id: 0 },
-            { name: 'testname', id: 1 },
-            { name: 'flurp', id: 2 }
-          ];
-          module(function($controllerProvider) {
-            $controllerProvider.register('testCtrl', function() {
-              expect(this.data).toBe(data);
-              called = true;
-              return {};
-            });
-          });
-          inject(function($controller, $rootScope) {
-            var ctrl = $controller('testCtrl', { scope: $rootScope }, { data: data });
-            expect(ctrl.data).toBe(data);
-            expect(called).toBe(true);
-          });
-        }
-      );
-
-
-      if (/chrome/.test(window.navigator.userAgent)) {
-        it('should support assigning bindings to class-based controller', function() {
-          var called = false;
-          var data = [
-            { name: 'derp1', id: 0 },
-            { name: 'testname', id: 1 },
-            { name: 'flurp', id: 2 }
-          ];
-          module(function($controllerProvider) {
-            // eslint-disable-next-line no-eval
-            var TestCtrl = eval('(class { constructor() { called = true; } })');
-            $controllerProvider.register('testCtrl', TestCtrl);
-          });
-          inject(function($controller, $rootScope) {
-            var ctrl = $controller('testCtrl', { scope: $rootScope }, { data: data });
-            expect(ctrl.data).toBe(data);
-            expect(called).toBe(true);
-          });
-        });
-      }
+      inject(function($controller, $rootScope) {
+        var ctrl = $controller('testCtrl', { scope: $rootScope }, { data: data });
+        expect(ctrl.data).toBe(data);
+        expect(called).toBe(true);
+      });
     });
 
 
-    describe('with `preAssignBindingsEnabled(false)`', function() {
-
-      beforeEach(module(function($compileProvider) {
-        $compileProvider.preAssignBindingsEnabled(false);
-      }));
-
-
-      it('should support creating controller with bindings', function() {
+    it('should support assigning bindings when a value is returned from the constructor',
+      function() {
         var called = false;
         var data = [
           { name: 'derp1', id: 0 },
@@ -2149,6 +2157,7 @@ describe('ngMock', function() {
           $controllerProvider.register('testCtrl', function() {
             expect(this.data).toBeUndefined();
             called = true;
+            return {};
           });
         });
         inject(function($controller, $rootScope) {
@@ -2156,54 +2165,30 @@ describe('ngMock', function() {
           expect(ctrl.data).toBe(data);
           expect(called).toBe(true);
         });
-      });
-
-
-      it('should support assigning bindings when a value is returned from the constructor',
-        function() {
-          var called = false;
-          var data = [
-            { name: 'derp1', id: 0 },
-            { name: 'testname', id: 1 },
-            { name: 'flurp', id: 2 }
-          ];
-          module(function($controllerProvider) {
-            $controllerProvider.register('testCtrl', function() {
-              expect(this.data).toBeUndefined();
-              called = true;
-              return {};
-            });
-          });
-          inject(function($controller, $rootScope) {
-            var ctrl = $controller('testCtrl', { scope: $rootScope }, { data: data });
-            expect(ctrl.data).toBe(data);
-            expect(called).toBe(true);
-          });
-        }
-      );
-
-
-      if (/chrome/.test(window.navigator.userAgent)) {
-        it('should support assigning bindings to class-based controller', function() {
-          var called = false;
-          var data = [
-            { name: 'derp1', id: 0 },
-            { name: 'testname', id: 1 },
-            { name: 'flurp', id: 2 }
-          ];
-          module(function($controllerProvider) {
-            // eslint-disable-next-line no-eval
-            var TestCtrl = eval('(class { constructor() { called = true; } })');
-            $controllerProvider.register('testCtrl', TestCtrl);
-          });
-          inject(function($controller, $rootScope) {
-            var ctrl = $controller('testCtrl', { scope: $rootScope }, { data: data });
-            expect(ctrl.data).toBe(data);
-            expect(called).toBe(true);
-          });
-        });
       }
-    });
+    );
+
+
+    if (support.classes) {
+      it('should support assigning bindings to class-based controller', function() {
+        var called = false;
+        var data = [
+          { name: 'derp1', id: 0 },
+          { name: 'testname', id: 1 },
+          { name: 'flurp', id: 2 }
+        ];
+        module(function($controllerProvider) {
+          // eslint-disable-next-line no-eval
+          var TestCtrl = eval('(class { constructor() { called = true; } })');
+          $controllerProvider.register('testCtrl', TestCtrl);
+        });
+        inject(function($controller, $rootScope) {
+          var ctrl = $controller('testCtrl', { scope: $rootScope }, { data: data });
+          expect(ctrl.data).toBe(data);
+          expect(called).toBe(true);
+        });
+      });
+    }
   });
 
 
@@ -2432,13 +2417,15 @@ describe('ngMock', function() {
 
 describe('ngMockE2E', function() {
   describe('$httpBackend', function() {
-    var hb, realHttpBackend, callback;
+    var hb, realHttpBackend, realHttpBackendBrowser, callback;
 
     beforeEach(function() {
       callback = jasmine.createSpy('callback');
       angular.module('ng').config(function($provide) {
         realHttpBackend = jasmine.createSpy('real $httpBackend');
-        $provide.value('$httpBackend', realHttpBackend);
+        $provide.factory('$httpBackend', ['$browser', function($browser) {
+          return realHttpBackend.and.callFake(function() { realHttpBackendBrowser = $browser; });
+        }]);
       });
       module('ngMockE2E');
       inject(function($injector) {
@@ -2476,6 +2463,14 @@ describe('ngMockE2E', function() {
 
         expect(realHttpBackend).not.toHaveBeenCalled();
         expect(callback).toHaveBeenCalledOnceWith(200, 'passThrough override', '', '');
+      }));
+
+      it('should pass through to an httpBackend that uses the same $browser service', inject(function($browser) {
+        hb.when('GET', /\/passThrough\/.*/).passThrough();
+        hb('GET', '/passThrough/23');
+
+        expect(realHttpBackend).toHaveBeenCalledOnce();
+        expect(realHttpBackendBrowser).toBe($browser);
       }));
     });
 

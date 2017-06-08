@@ -710,6 +710,7 @@ describe('$location', function() {
       );
     });
 
+
     it('should not infinitely digest when using a semicolon in initial path', function() {
       initService({html5Mode:true,supportHistory:true});
       mockUpBrowser({initialUrl:'http://localhost:9876/;jsessionid=foo', baseHref:'/'});
@@ -718,6 +719,63 @@ describe('$location', function() {
           $rootScope.$digest();
         }).not.toThrow();
       });
+    });
+
+
+    describe('when changing the browser URL/history directly during a `$digest`', function() {
+
+      beforeEach(function() {
+        initService({supportHistory: true});
+        mockUpBrowser({initialUrl: 'http://foo.bar/', baseHref: '/'});
+      });
+
+
+      it('should correctly update `$location` from history and not digest infinitely', inject(
+        function($browser, $location, $rootScope, $window) {
+          $location.url('baz');
+          $rootScope.$digest();
+
+          var originalUrl = $window.location.href;
+
+          $rootScope.$apply(function() {
+            $rootScope.$evalAsync(function() {
+              $window.history.pushState({}, null, originalUrl + '/qux');
+            });
+          });
+
+          expect($browser.url()).toBe('http://foo.bar/#!/baz/qux');
+          expect($location.absUrl()).toBe('http://foo.bar/#!/baz/qux');
+
+          $rootScope.$apply(function() {
+            $rootScope.$evalAsync(function() {
+              $window.history.replaceState({}, null, originalUrl + '/quux');
+            });
+          });
+
+          expect($browser.url()).toBe('http://foo.bar/#!/baz/quux');
+          expect($location.absUrl()).toBe('http://foo.bar/#!/baz/quux');
+        })
+      );
+
+
+      it('should correctly update `$location` from URL and not digest infinitely', inject(
+        function($browser, $location, $rootScope, $window) {
+          $location.url('baz');
+          $rootScope.$digest();
+
+          $rootScope.$apply(function() {
+            $rootScope.$evalAsync(function() {
+              $window.location.href += '/qux';
+            });
+          });
+
+          jqLite($window).triggerHandler('hashchange');
+
+          expect($browser.url()).toBe('http://foo.bar/#!/baz/qux');
+          expect($location.absUrl()).toBe('http://foo.bar/#!/baz/qux');
+        })
+      );
+
     });
 
 
@@ -1039,11 +1097,21 @@ describe('$location', function() {
     });
 
     it('should update $location when browser state changes', function() {
-      initService({html5Mode:true, supportHistory: true});
-      mockUpBrowser({initialUrl:'http://new.com/a/b/', baseHref:'/a/b/'});
-      inject(function($location, $window) {
+      initService({html5Mode: true, supportHistory: true});
+      mockUpBrowser({initialUrl: 'http://new.com/a/b/', baseHref: '/a/b/'});
+      inject(function($location, $rootScope, $window) {
         $window.history.pushState({b: 3});
+        $rootScope.$digest();
+
         expect($location.state()).toEqual({b: 3});
+
+        $window.history.pushState({b: 4}, null, $window.location.href + 'c?d=e#f');
+        $rootScope.$digest();
+
+        expect($location.path()).toBe('/c');
+        expect($location.search()).toEqual({d: 'e'});
+        expect($location.hash()).toBe('f');
+        expect($location.state()).toEqual({b: 4});
       });
     });
 
@@ -1819,29 +1887,11 @@ describe('$location', function() {
         initBrowser({ url: 'http://host.com/base/index.html', basePath: '/base/index.html' }),
         setupRewriteChecks(),
         function($browser) {
-          var rightClick;
-          if (window.document.createEvent) {
-            rightClick = window.document.createEvent('MouseEvents');
-            rightClick.initMouseEvent('click', true, true, window, 1, 10, 10, 10,  10, false,
-                                      false, false, false, 2, null);
+          var rightClick = window.document.createEvent('MouseEvents');
+          rightClick.initMouseEvent('click', true, true, window, 1, 10, 10, 10,  10, false,
+                                    false, false, false, 2, null);
 
-            link.dispatchEvent(rightClick);
-          } else if (window.document.createEventObject) { // for IE
-            rightClick = window.document.createEventObject();
-            rightClick.type = 'click';
-            rightClick.cancelBubble = true;
-            rightClick.detail = 1;
-            rightClick.screenX = 10;
-            rightClick.screenY = 10;
-            rightClick.clientX = 10;
-            rightClick.clientY = 10;
-            rightClick.ctrlKey = false;
-            rightClick.altKey = false;
-            rightClick.shiftKey = false;
-            rightClick.metaKey = false;
-            rightClick.button = 2;
-            link.fireEvent('onclick', rightClick);
-          }
+          link.dispatchEvent(rightClick);
           expectNoRewrite($browser);
         }
       );
@@ -2666,12 +2716,10 @@ describe('$location', function() {
           replaceState: function(state, title, url) {
             win.history.state = copy(state);
             if (url) win.location.href = url;
-            jqLite(win).triggerHandler('popstate');
           },
           pushState: function(state, title, url) {
             win.history.state = copy(state);
             if (url) win.location.href = url;
-            jqLite(win).triggerHandler('popstate');
           }
         };
         win.addEventListener = angular.noop;
